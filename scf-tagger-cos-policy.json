@@ -1,0 +1,33 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "cos:HeadBucket",
+        "cos:ListBucket"
+      ],
+      "resource": [
+        "qcs::cos:<REGION>:uid/<APPID>:<BUCKET>-<APPID>"
+      ]
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "cos:GetObject"
+      ],
+      "resource": [
+        "qcs::cos:<REGION>:uid/<APPID>:<BUCKET>-<APPID>/<INPUT_PREFIX>*"
+      ]
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "cos:PutObject"
+      ],
+      "resource": [
+        "qcs::cos:<REGION>:uid/<APPID>:<BUCKET>-<APPID>/<OUTPUT_PREFIX>*"
+      ]
+    }
+  ]
+}
