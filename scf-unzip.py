@@ -261,7 +261,7 @@ def main_handler(event, context):
         except Exception:
             pass
 
-        return {
+        return {  # Return structured result
             'status': 'ok',
             'bucket': cos_bucket,
             'source_key': zip_key,

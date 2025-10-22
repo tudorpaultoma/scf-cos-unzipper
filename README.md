@@ -2,6 +2,8 @@
 
 A Tencent Serverless Cloud Function (SCF) that automatically unzips newly uploaded archives in Cloud Object Storage (COS) and writes the extracted files back to COS under a structured prefix.
 
+**Important note**: *This script will work only if you need to unzip **archives less than 10 GBytes** as it is the hard limit of the SCF service*
+
 ## What it does
 
 - Listens to COS PutObject events.
