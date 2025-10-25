@@ -1,6 +1,7 @@
 """
 Tencent SCF COS Unzipper
 
+
 Purpose:
 - Serverless function that listens for COS PutObject events containing .zip files
 - Downloads the zip to /tmp, safely extracts entries, and uploads extracted files back to COS

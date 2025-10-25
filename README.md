@@ -1,5 +1,6 @@
 # SCF COS Unzipper
 
+
 A robust Tencent Serverless Cloud Function (SCF) that automatically unzips uploaded archives in Cloud Object Storage (COS) with recursive processing capabilities.
 
 **Important**: This function works with archives up to **10GB** (SCF hard limit).
