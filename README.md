@@ -1,36 +1,103 @@
 # SCF COS Unzipper
 
-A Tencent Serverless Cloud Function (SCF) that automatically unzips newly uploaded archives in Cloud Object Storage (COS) and writes the extracted files back to COS under a structured prefix.
+A robust Tencent Serverless Cloud Function (SCF) that automatically unzips uploaded archives in Cloud Object Storage (COS) with recursive processing capabilities.
 
-**Important note**: *This script will work only if you need to unzip **archives less than 10 GBytes** as it is the hard limit of the SCF service*
+**Important**: This function works with archives up to **10GB** (SCF hard limit).
 
-## What it does
+## Features
 
-- Listens to COS PutObject events.
-- Detects the first `.zip` in the event that is under `INPUT_PREFIX`.
-- Downloads the zip to `/tmp` inside the SCF runtime.
-- Safely extracts files (prevents Zip Slip, skips directories).
-- Uploads extracted files in parallel to `OUTPUT_PREFIX/<zip-base-name>/...` with proper `Content-Type` set via `mimetypes`.
-- Cleans up temporary files.
+🔄 **Recursive Processing**: Automatically detects and extracts nested zip files up to configurable depth  
+🛡️ **Security**: Prevents Zip Slip attacks and path traversal vulnerabilities  
+⚡ **Performance**: Parallel uploads with configurable worker threads  
+🎯 **Smart Filtering**: Ignores output files to prevent infinite loops  
+📁 **Clean Output**: Extracts contents only - no zip files in output folder  
+🔧 **Configurable**: Extensive environment variable configuration  
 
-## Why this is safe and robust
+## How it works
 
-- Prevents Zip Slip by rejecting absolute paths and any `..` traversal.
-- Robustly identifies directory entries using `ZipInfo.is_dir()` and the Unix mode bits in `external_attr` to avoid uploading 0-byte "folder" objects.
-- Fully URL-decodes object keys and normalizes leading `"/appid/bucket/..."` forms emitted by COS triggers.
+1. **Listens** to COS PutObject events for `.zip` files in `INPUT_PREFIX`
+2. **Downloads** zip to `/tmp` inside SCF runtime
+3. **Extracts** files safely (prevents Zip Slip, skips directories)
+4. **Processes recursively** - detects nested zips and extracts them to subdirectories
+5. **Uploads** extracted files in parallel to `OUTPUT_PREFIX/<zip-name>/...`
+6. **Cleans up** temporary files and returns processing statistics
 
-## Environment variables
+## Security & Safety
 
-- `COS_BUCKET`: Target COS bucket. Prefer full form `"<bucket>-<appid>"`. If the event supplies only the short bucket name, the function attempts to infer the full name.
-- `INPUT_PREFIX`: Prefix to watch for zip uploads (e.g., `"unzipper-input/"`).
-- `OUTPUT_PREFIX`: Prefix to write extracted files (e.g., `"unzipper-output/"`).
-- `REGION` or `TENCENTCLOUD_REGION`: COS region (default: `ap-guangzhou`).
-- `TENCENTCLOUD_SECRETID`, `TENCENTCLOUD_SECRETKEY`, `TENCENTCLOUD_SESSIONTOKEN`: Credentials injected by SCF role. Alternatively `SECRETID`, `SECRETKEY`, `SESSIONTOKEN`.
-- `MAX_WORKERS`: Optional concurrency for parallel uploads (default: `16`).
+- **Zip Slip Protection**: Rejects absolute paths and `..` traversal attempts
+- **Robust Directory Detection**: Uses `ZipInfo.is_dir()` and Unix mode bits to avoid 0-byte folder objects
+- **Key Normalization**: Handles COS event key formats including `"/appid/bucket/..."` patterns
+- **Loop Prevention**: Ignores files in output prefix to prevent self-triggering
+- **Depth Limiting**: Configurable recursion depth prevents zip bomb attacks
 
-## Permissions (CAM Policy)
+## Recursive Processing Example
 
-Attach a role with the following minimum permissions (replace placeholders):
+```
+Input: main.zip containing:
+  - document.pdf
+  - images.zip containing:
+    - photo1.jpg
+    - photo2.jpg
+  - data.zip containing:
+    - spreadsheet.xlsx
+    - archive.zip containing:
+      - backup.txt
+
+Output in COS:
+  unzipper-output/main/
+  ├── document.pdf
+  ├── images/
+  │   ├── photo1.jpg
+  │   └── photo2.jpg
+  └── data/
+      ├── spreadsheet.xlsx
+      └── archive/
+          └── backup.txt
+```
+
+**Note**: Only extracted files are uploaded - zip files themselves are not saved to output.
+
+## Environment Variables
+
+### Required
+- `COS_BUCKET`: Target COS bucket (prefer full form `"bucket-appid"`)
+- `INPUT_PREFIX`: Prefix to watch for zip uploads (e.g., `"unzip-in/"`)
+- `OUTPUT_PREFIX`: Prefix to write extracted files (e.g., `"unzipper-output/"`)
+
+### Optional
+- `REGION` or `TENCENTCLOUD_REGION`: COS region (default: `"ap-guangzhou"`)
+- `MAX_WORKERS`: Parallel upload threads (default: `16`)
+- `MAX_RECURSION_DEPTH`: Maximum nesting levels (default: `10`)
+
+### Credentials (usually auto-provided by SCF role)
+- `TENCENTCLOUD_SECRETID`, `TENCENTCLOUD_SECRETKEY`, `TENCENTCLOUD_SESSIONTOKEN`
+- Alternative: `SECRETID`, `SECRETKEY`, `SESSIONTOKEN`
+
+## Deployment
+
+### 1. Create SCF Function
+- Runtime: **Python 3.9**
+- Handler: `scf-unzip.main_handler`
+- Memory: 512MB minimum
+- Timeout: 300s (5 minutes)
+
+### 2. Set Environment Variables
+```bash
+COS_BUCKET=your-bucket-123456789
+INPUT_PREFIX=unzip-in/
+OUTPUT_PREFIX=unzipper-output/
+MAX_RECURSION_DEPTH=10
+MAX_WORKERS=16
+```
+
+### 3. Configure COS Trigger
+- Event type: `cos:ObjectCreated:Put`
+- Bucket: Same as `COS_BUCKET`
+- Prefix filter: Same as `INPUT_PREFIX` (e.g., `unzip-in/`)
+- Suffix filter: `.zip` (recommended)
+
+### 4. Attach CAM Role
+Create a role with the following permissions:
 
 ```json
 {
@@ -55,50 +122,76 @@ Attach a role with the following minimum permissions (replace placeholders):
 }
 ```
 
-Placeholders:
+Replace placeholders:
 - `<REGION>`: e.g., `ap-guangzhou`
-- `<APPID>`: Your Tencent Cloud account appid
-- `<BUCKET>`: Bucket short name (without the `-appid` suffix)
-- `<INPUT_PREFIX>`: Input prefix (must end with `/`), e.g., `unzipper-input/`
-- `<OUTPUT_PREFIX>`: Output prefix (must end with `/`), e.g., `unzipper-output/`
+- `<APPID>`: Your Tencent Cloud account APPID
+- `<BUCKET>`: Bucket short name (without `-appid` suffix)
+- `<INPUT_PREFIX>`: e.g., `unzip-in/`
+- `<OUTPUT_PREFIX>`: e.g., `unzipper-output/`
 
-Note: You may scope `GetObject` to only `.zip` files if desired: `.../<INPUT_PREFIX>*` is usually sufficient.
+## Response Format
 
-## Deployment steps
+### Success
+```json
+{
+  "status": "ok",
+  "bucket": "your-bucket",
+  "source_key": "unzip-in/archive.zip",
+  "output_prefix": "unzipper-output/archive",
+  "files_uploaded": 15,
+  "nested_zips_processed": 3,
+  "max_depth_reached": false
+}
+```
 
-1. Create an SCF function (Python 3.7+ runtime recommended).
-2. Upload `scf-unzip.py` and set the handler to `scf-unzip.main_handler`.
-3. Set environment variables as needed:
-   - `COS_BUCKET`, `INPUT_PREFIX`, `OUTPUT_PREFIX`, `REGION`, `MAX_WORKERS`.
-4. Attach the CAM role with the policy above.
-5. Configure a COS Trigger:
-   - Event type: PutObject
-   - Filter prefix: your `INPUT_PREFIX`
-   - Optionally filter suffix: `.zip`
-6. Test by uploading a zip to `INPUT_PREFIX`.
+### Ignored/Error
+```json
+{
+  "status": "ignored",
+  "reason": "no zip in records",
+  "keys": [{"raw": "...", "normalized": "..."}],
+  "bucket": "your-bucket",
+  "input_prefix": "unzip-in/"
+}
+```
 
-## Local testing
+## Local Testing
 
-You can invoke the script locally with a simulated event. Set `TEST_KEY` env var to the path of a zip under `INPUT_PREFIX` or leave default.
+Set environment variables and run:
 
 ```bash
-export INPUT_PREFIX="unzipper-input/"
+export COS_BUCKET="your-bucket-123456789"
+export INPUT_PREFIX="unzip-in/"
 export OUTPUT_PREFIX="unzipper-output/"
-export COS_BUCKET="your-bucket-<appid>"
+export TEST_KEY="unzip-in/test.zip"
 python scf-unzip.py
 ```
 
-Output will be a JSON summary.
+## Dependencies
 
-## Implementation notes
+- `cos-python-sdk-v5>=1.9.24`
+- `urllib3<2.0.0` (for SCF OpenSSL compatibility)
+- `requests>=2.25.0,<3.0.0`
 
-- Concurrency: Uses a `ThreadPoolExecutor` for parallel uploads; tune `MAX_WORKERS` for your typical file sizes and network conditions.
-- Content types: Determined via `mimetypes.guess_type`, defaulting to `application/octet-stream`.
-- Temp space: SCF provides `/tmp` for temporary files.
-- Error handling: Returns a structured error message; consider integrating with logging/observability for production.
+## Implementation Notes
 
-## Limitations / Future improvements
+- **Concurrency**: Uses `ThreadPoolExecutor` for parallel uploads
+- **Content Types**: Determined via `mimetypes.guess_type`
+- **Memory Usage**: Loads individual files into memory (suitable for typical file sizes)
+- **Temp Space**: Uses SCF's `/tmp` directory for processing
+- **Error Handling**: Continues processing other files if individual nested zips fail
 
-- Very large entries are currently read fully into memory before upload; consider streaming the entry file-like object directly to `put_object` for huge files.
-- No retry/backoff on upload failures; SCF retries may cover transient issues, but explicit retries can be added.
-- No checksum validation between extracted data and uploaded objects; add if required for compliance.
+## Limitations
+
+- **File Size**: Individual files limited by available memory and SCF constraints
+- **Archive Size**: Total archive size limited to 10GB (SCF limit)
+- **Processing Time**: Function timeout applies to entire processing (configure accordingly)
+- **Concurrency**: Nested zips processed sequentially to manage memory usage
+
+## Version History
+
+- **v1.0**: Basic zip extraction
+- **v1.1**: Added key normalization for COS event formats
+- **v1.2**: Added loop prevention for output prefix
+- **v1.3**: Added recursive nested zip processing
+- **v1.4**: Removed zip file upload - extract contents only
